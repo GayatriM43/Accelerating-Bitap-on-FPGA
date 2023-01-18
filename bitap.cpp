@@ -70,31 +70,18 @@ void mmult(const int* text, // Text 0-A 1-G 2-C 3-T
            ) {
 
     // Local memory to store input and output matrices
-    int textLocal[MAX_SIZE];
-#pragma HLS ARRAY_PARTITION variable = textLocal dim = 1 complete
 
-    int pmLocal[MAX_SIZE][MAX_SIZE];
+    int pmLocal[4][MAX_SIZE];
 #pragma HLS ARRAY_PARTITION variable = pmLocal dim = 1 complete
 
-    int R[MAX_SIZE][MAX_SIZE][MAX_SIZE];
+    int R[64];
 #pragma HLS ARRAY_PARTITION variable = R dim = 0 complete
 
-    int startlocLocal[MAX_SIZE];
-#pragma HLS ARRAY_PARTITION variable = startlocLocal dim = 0 complete
-
-    int edidistLocal[MAX_SIZE];
-#pragma HLS ARRAY_PARTITION variable = edidistLocal dim = 0 complete
 
 
 // Burst reads on input matrices from global memory
 // Read Input A
 // Auto-pipeline is going to apply pipeline to these loops
-readA:
-    for (int i=0;i<n;i++) {
-#pragma HLS LOOP_TRIPCOUNT min = c_size* c_size max = c_size * c_size
-        textLocal[i] = text[i];
-    }
-
 // Read Input B
 readB:
     for (int i=0,j=0,loc=0;i<m&&j<4&&loc<m*4;i++,loc++) {
@@ -147,55 +134,55 @@ readB:
 //       |___|      |___|      |___|      |___|
 
 int align_num=0;
-systolic1:
-for (int d = 0; d <= k; d++) {
-#pragma HLS LOOP_TRIPCOUNT min = c_size max = c_size
-    systolic2:
-        for (int text_pos = 0; text_pos < MAX_SIZE; text_pos++) {
-        systolic3:
-            for (int que_pos = 0; que_pos < MAX_SIZE; que_pos++) {
-#pragma HLS UNROLL
-
-                // Get previous sum
-                int D,S,M,I,result;
-                result=que_pos==0?1:text_pos==0?0:0;
-                if(d==0)
+    for (int text_pos = 0; text_pos <= 5; text_pos++)
+     {
+        #pragma HLS LOOP_TRIPCOUNT min = c_size max = c_size
+        for (int d = 0; d <= k; d++) 
+        {
+            #pragma HLS LOOP_TRIPCOUNT min = c_size max = c_size
+            for(int num_pat=0;num_pat<2;num_pat++)
+            {
+                #pragma HLS unroll
+                for (int que_pos = 0; que_pos <= 4; que_pos++) 
                 {
-                    if(text_pos<=n && que_pos<=m && text_pos>0 && que_pos>0)
+                    #pragma HLS unroll
+                    int D,S,M,I,result;
+                    result=que_pos==0?1:text_pos==0?0:0;
+                    if(d==0 && text_pos>0 && que_pos>0)
                     {
-                        result=R[text_pos-1][que_pos-1][d]&&pmLocal[text[text_pos]][que_pos];
+                        int ind=num_pat*2*(k+1)*(m+1)+((text_pos-1)%2)*(k+1)*(m+1)+d*(m+1)+(que_pos-1);
+                        result=R[ind]&&pattern[text[text_pos-1]][num_pat*4+que_pos-1];
+                    }
+                    else if(text_pos>0 && que_pos>0)
+                    {
+                            int ind1=num_pat*2*(k+1)*(m+1) + ((text_pos-1)%2)*(k+1)*(m+1) + d*(m+1) + (que_pos-1);
+                            int ind2=num_pat*2*(k+1)*(m+1) + ((text_pos-1)%2)*(k+1)*(m+1) + (d-1)*(m+1) + (que_pos-1);
+                            int ind3=num_pat*2*(k+1)*(m+1) + ((text_pos)%2)*(k+1)*(m+1) + (d-1)*(m+1) + (que_pos-1);
+                            int ind4=num_pat*2*(k+1)*(m+1) + ((text_pos-1)%2)*(k+1)*(m+1) + (d-1)*(m+1) + (que_pos);
+                            M=R[ind1]&&pattern[text[text_pos-1]][num_pat*4+que_pos-1];
+                            S=R[ind2];
+                            D=R[ind3];
+                            I=R[ind4];
+                            result=M||S||D||I;
+                    }
+                    int ind=num_pat*2*(k+1)*(m+1)+((text_pos)%2)*(k+1)*(m+1)+d*(m+1)+(que_pos);
+                    R[ind]=result;
+                    //cout<<R[ind];
+            
+                    if(que_pos==m && result==1)
+                    {
+                        startloc[align_num]=text_pos;
+                        editdist[align_num]=d;
+                        align_num++;
                     }
                 }
-                else
-                {
-                    if(text_pos<=n && que_pos<=m && text_pos>0 && que_pos>0)
-                    {
-                        M=R[text_pos-1][que_pos-1][d]&&pmLocal[text[text_pos]][que_pos];
-                        S=R[text_pos-1][que_pos-1][d-1];
-                        D=R[text_pos][que_pos-1][d-1];
-                        I=R[text_pos-1][que_pos][d-1];
-                        result=M&&S&&D&&I;
-                    }    
-                }
-                R[text_pos][que_pos][d]=result;
-                if(que_pos==m)
-                {
-                    startlocLocal[align_num]=text_pos;
-                    edidistLocal[align_num]=d;
-                    align_num++;
-                }
             }
+            //cout<<" ";
         }
+        //cout<<endl;
     }
 
 // Burst write from output matrices to global memory
 // Burst write from matrix C
-writeC:
-    for (int loc = 0; loc < align_num; loc++) {
-#pragma HLS LOOP_TRIPCOUNT min = c_size* c_size max = c_size * c_size
-        startloc[loc]=startlocLocal[loc];
-        editdist[loc]=edidistLocal[loc];
-    }
-    size=align_num;
 }
 }
