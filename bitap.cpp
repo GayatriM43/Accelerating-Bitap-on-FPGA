@@ -1,57 +1,9 @@
-/**
-* Copyright (C) 2019-2021 Xilinx, Inc
-*
-* Licensed under the Apache License, Version 2.0 (the "License"). You may
-* not use this file except in compliance with the License. A copy of the
-* License is located at
-*
-*     http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing, software
-* distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
-* WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
-* License for the specific language governing permissions and limitations
-* under the License.
-*/
 
-/*******************************************************************************
-
-Vitis Key Concept :
-
-    This is a matrix multiplication example which showcases the "Systolic Array"
-    based algorithm design. Systolic array type of implementation is well suited
-    for FPGAs.
-
-*******************************************************************************/
-
-/*
-
-Kernel Description :
-
-    This kernel is a systolic array based matrix multiplication. Though the
-    maximum size of the input matrices are restricted to a smaller MAX_SIZE, it
-    is still possible to use this approach and get better performance for larger
-    matrices by using tiling.
-
-    Arguments :
-
-        int *a     (input )  --> Input  Matrix A
-        int *b     (input )  --> Input  Matrix B
-        int *c     (output)  --> Output Matrix
-        int  a_row (input )  --> Row Size Matrix A
-        int  a_col (input )  --> Col Size Matrix A
-        int  b_col (input )  --> Col Size Matrix B
-
-    Kernel Configuration :
-
-        Max Size    --> 16
-
-    Note :
-        Max Size is dependent on the available DSP resources in the FPGA
-*/
 
 #include <stdio.h>
-
+#include<cmath>
+#include <climits>
+#include<iostream>
 // Maximum Array Size
 #define MAX_SIZE 16
 
@@ -59,130 +11,138 @@ Kernel Description :
 const unsigned int c_size = MAX_SIZE;
 
 extern "C" {
-void mmult(const int* text, // Text 0-A 1-G 2-C 3-T
-           const int* pm, // Pattern bitmask of query
-           int k, //Edit distance < MAX_SIZE
-           int n,//length of text <= MAX_SIZE
-           int m,//length of pattern <= MAX_SIZE
-           int* startloc,// Starting location of alignments within k edit distance
-           int* editdist,//Edit distance of corresponding alignments
-           int size
+void bin(long long int n)
+{
+	int count =0;
+	while(n!=0 && count<64)
+	{
+		std::cout<<(n&1);
+		n=n>>1;
+		count++;
+	}
+
+}
+void bitap(const long long int* text, // text packed into integers
+           const long long int* pattern, // pattern bitmasks of all patterns packed into integers
+           int* startloc,       // starting location of alignments
+           int* pattern_num,   //edit distance of alignments
+           int n,    // len of text
+           int m,    // len of pattern
+           int len,     // number of array elements for pattern bitmask of each pattern
+           int num_pat //number of patterns
            ) {
 
     // Local memory to store input and output matrices
+long long int R[num_pat][len];
+//#pragma HLS ARRAY_PARTITION variable=R dim=1 complete
+//#pragma HLS bind_storage variable=R type=FIFO impl=SRL
 
-    int pmLocal[4][MAX_SIZE];
-#pragma HLS ARRAY_PARTITION variable = pmLocal dim = 1 complete
-
-    int R[64];
-#pragma HLS ARRAY_PARTITION variable = R dim = 0 complete
-
-
-
-// Burst reads on input matrices from global memory
-// Read Input A
-// Auto-pipeline is going to apply pipeline to these loops
-// Read Input B
-readB:
-    for (int i=0,j=0,loc=0;i<m&&j<4&&loc<m*4;i++,loc++) {
-#pragma HLS LOOP_TRIPCOUNT min = c_size* c_size max = c_size * c_size
-        if(i%m==0)
+   long long int max = ULLONG_MAX;
+    for(int pat = 0;pat < num_pat;pat++)
         {
-            i=0;
-            j++;
-        }
-        pmLocal[j][i] = pm[loc];
-    }
-
-// Perform systolic matrix multiply
-// local matrices localA and localB have been partitioned in dimensions
-// 1 and 2 respectively. local matrix C has been partitioned completely
-
-// This partitioning enables to access MAX_SIZE elements in parallel in
-// the local matrices. Because of the mode of access of array elements,
-// we are able to perform MAX_SIZE*MAX_SIZE operations in parallel.
-
-// Note : i, j and k loops are interchanged.
-
-// The top loop systolic1 runs only for a_col iterations instead of
-// MAX_SIZE like the inner loops. The inner loops have fixed loop
-// iteration counts to enable complete unroll
-
-// The following diagram explains how the matrix multiply happens
-//
-//        B_0        B_1        B_2        B_3
-//         |          |          |          |
-//         v          v          v          v
-//        ___        ___        ___        ___
-//       |   |      |   |      |   |      |   |
-//  A0_->|C00| ---- |C01| ---- |C02| ---- |C03|
-//       |___|      |___|      |___|      |___|
-//         |          |          |          |
-//        ___        ___        ___        ___
-//       |   |      |   |      |   |      |   |
-//  A1_->|C10| ---- |C11| ---- |C12| ---- |C13|
-//       |___|      |___|      |___|      |___|
-//         |          |          |          |
-//        ___        ___        ___        ___
-//       |   |      |   |      |   |      |   |
-//  A2_->|C20| ---- |C21| ---- |C21| ---- |C21|
-//       |___|      |___|      |___|      |___|
-//         |          |          |          |
-//        ___        ___        ___        ___
-//       |   |      |   |      |   |      |   |
-//  A3_->|C30| ---- |C31| ---- |C32| ---- |C33|
-//       |___|      |___|      |___|      |___|
-
-int align_num=0;
-    for (int text_pos = 0; text_pos <= 5; text_pos++)
-     {
-        #pragma HLS LOOP_TRIPCOUNT min = c_size max = c_size
-        for (int d = 0; d <= k; d++) 
-        {
-            #pragma HLS LOOP_TRIPCOUNT min = c_size max = c_size
-            for(int num_pat=0;num_pat<2;num_pat++)
+            for(int pat_size = 0;pat_size<len;pat_size++)
             {
-                #pragma HLS unroll
-                for (int que_pos = 0; que_pos <= 4; que_pos++) 
+                R[pat][pat_size] = max;
+            }
+        }
+
+long long int localPM[num_pat][len*4];
+//#pragma HLS ARRAY_PARTITION variable=localPM dim=1 complete
+//#pragma HLS bind_storage variable=localPM type=RAM_1WNR impl=BRAM
+
+for(int i = 0,loc=0;i<num_pat;i++)
+{
+    for(int j=0;j<len*4;j++,loc++)
+    {
+       // #pragma HLS pipeline II=1
+        localPM[i][j] = pattern[loc];
+    }
+}
+int localpat[MAX_SIZE];
+//#pragma HLS ARRAY_PARTITION variable = localpat dim = 0 complete
+#pragma HLS bind_storage variable=localpat type=RAM_1WNR impl=URAM
+
+int localstart[MAX_SIZE];
+//#pragma HLS ARRAY_PARTITION variable = localstart dim = 0 complete
+#pragma HLS bind_storage variable=localstart type=RAM_1WNR impl=URAM
+
+long long int localText[MAX_SIZE];
+//#pragma HLS ARRAY_PARTITION variable = localText dim = 0 complete
+#pragma HLS bind_storage variable=localText type=RAM_1WNR impl=URAM
+
+int total_itr = ceil(n/float(MAX_SIZE));
+int cur = 0;
+for(int itr = 0;itr < total_itr; itr++)
+{
+
+    for (int i = 0; i < MAX_SIZE && i+itr*MAX_SIZE<n ;i++) {
+   // #pragma HLS LOOP_TRIPCOUNT min = c_size* c_size max = c_size * c_size
+    //#pragma HLS pipeline II=1
+        localText[i] = text[i+itr*MAX_SIZE];
+        bin(localText[i]);
+    }
+    std::cout<<"\n";
+
+    for(int txt_pos = 0;txt_pos<MAX_SIZE*32;txt_pos++)
+    {
+        //#pragma HLS pipeline II=2
+        for(int pat = 0;pat<num_pat;pat++)
+        {
+            //#pragma HLS unroll
+            //shift R
+            R[pat][0] = R[pat][0] << 1;
+            for(int i=1;i <len;i++)
+            {
+                //#pragma HLS pipeline II=1
+                R[pat][i-1] |= (R[pat][i] >> 63);
+                R[pat][i] = R[pat][i] << 1;
+            }
+
+            //OR with patternbitmask
+            int p = 31 - ((txt_pos%32)*2);
+            int cur_char = (3 & ( localText[txt_pos>>5]>> (p - 1)));
+            for(int i=0;i < len;i++)
+            {
+                //#pragma HLS pipeline II=1
+                R[pat][i] = R[pat][i]|localPM[pat][i+cur_char*len];
+            }
+
+            //Check and store output
+            int msb = R[pat][0]>>63;
+            if(msb == 0)
+            {
+                localstart[cur%MAX_SIZE] = txt_pos;
+                localpat[cur%MAX_SIZE] = pat;
+                cur++;
+                if(cur % MAX_SIZE == 0)
                 {
-                    #pragma HLS unroll
-                    int D,S,M,I,result;
-                    result=que_pos==0?1:text_pos==0?0:0;
-                    if(d==0 && text_pos>0 && que_pos>0)
+                    for(int i = 0;i < MAX_SIZE;i++)
                     {
-                        int ind=num_pat*2*(k+1)*(m+1)+((text_pos-1)%2)*(k+1)*(m+1)+d*(m+1)+(que_pos-1);
-                        result=R[ind]&&pattern[text[text_pos-1]][num_pat*4+que_pos-1];
-                    }
-                    else if(text_pos>0 && que_pos>0)
-                    {
-                            int ind1=num_pat*2*(k+1)*(m+1) + ((text_pos-1)%2)*(k+1)*(m+1) + d*(m+1) + (que_pos-1);
-                            int ind2=num_pat*2*(k+1)*(m+1) + ((text_pos-1)%2)*(k+1)*(m+1) + (d-1)*(m+1) + (que_pos-1);
-                            int ind3=num_pat*2*(k+1)*(m+1) + ((text_pos)%2)*(k+1)*(m+1) + (d-1)*(m+1) + (que_pos-1);
-                            int ind4=num_pat*2*(k+1)*(m+1) + ((text_pos-1)%2)*(k+1)*(m+1) + (d-1)*(m+1) + (que_pos);
-                            M=R[ind1]&&pattern[text[text_pos-1]][num_pat*4+que_pos-1];
-                            S=R[ind2];
-                            D=R[ind3];
-                            I=R[ind4];
-                            result=M||S||D||I;
-                    }
-                    int ind=num_pat*2*(k+1)*(m+1)+((text_pos)%2)*(k+1)*(m+1)+d*(m+1)+(que_pos);
-                    R[ind]=result;
-                    //cout<<R[ind];
-            
-                    if(que_pos==m && result==1)
-                    {
-                        startloc[align_num]=text_pos;
-                        editdist[align_num]=d;
-                        align_num++;
+                        startloc[cur] = localstart[i];
+                        pattern_num[cur] = localpat[i];
                     }
                 }
             }
-            //cout<<" ";
+
+
         }
-        //cout<<endl;
+        if(cur % MAX_SIZE)
+        {
+        for(int i = 0;i < MAX_SIZE;i++)
+
+        {
+            startloc[cur] = localstart[i];
+            pattern_num[cur] = localpat[i];
+
+        }
+        cur++;
+        }
+    }
+    }
+}
+
+
+
+
     }
 
-// Burst write from output matrices to global memory
-// Burst write from matrix C
-}
-}
